@@ -1,0 +1,32 @@
+infra/terraform/.env
+infra/terraform/terraform.tfvars
+infra/terraform/.terraform
+infra/terraform/terraform.tfstate*
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/terraform.tfstate
+infra/terraform/terraform.tfstate.backup
+infra/terraform/*.tfvars
+infra/terraform/.env
+infra/terraform/tfplan
+
+# Ansible
+infra/ansible/inventory/hosts
+infra/ansible/*.retry
+
+# SSH Keys
+*.pem
+*.key
+id_rsa*
+aws_devops_key*
+
+# Environment files
+.env
+*.env
+
+# Traefik SSL
+traefik/acme.json
+infra/terraform/terraform.tfvars
+infra/terraform/terraform.tfvars

@@ -1,5 +1,5 @@
 # Multi-stage build for Go auth service
-FROM golang:1.19-alpine AS builder
+FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 
@@ -12,8 +12,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+# Build the application (output as auth-api, not main)
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o auth-api .
 
 # Production stage
 FROM alpine:latest
@@ -23,8 +23,8 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 
 # Copy binary from builder
-COPY --from=builder /app/main .
+COPY --from=builder /app/auth-api .
 
 EXPOSE 8080
 
-CMD ["./main"]
+CMD ["./auth-api"]
