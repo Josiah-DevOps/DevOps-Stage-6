@@ -1,0 +1,105 @@
+name: Application Deployment
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - 'auth-api/**'
+      - 'todos-api/**'
+      - 'users-api/**'
+      - 'log-message-processor/**'
+      - 'docker-compose.yml'
+      - 'traefik/**'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-north-1
+
+jobs:
+  deploy-app:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Get Server IP
+        id: get_ip
+        working-directory: infra/terraform
+        run: |
+          terraform init
+          SERVER_IP=$(terraform output -raw instance_public_ip)
+          echo "server_ip=$SERVER_IP" >> $GITHUB_OUTPUT
+          echo "Server IP: $SERVER_IP"
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ steps.get_ip.outputs.server_ip }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Setup Ansible
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
+
+      - name: Deploy application
+        working-directory: infra/ansible
+        run: |
+          ansible-playbook -i inventory/hosts playbook.yml \
+            -e "github_username=${{ github.repository_owner }}" \
+            -e "force_restart=true"
+
+      - name: Verify deployment
+        run: |
+          sleep 30
+          curl -f https://jfive.mooo.com || exit 1
+
+      - name: Send success email
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "✅ Application Deployment Successful"
+          to: josiahfavour02@gmail.com
+          from: DevOps Stage 6 Alert
+          body: |
+            Application deployed successfully!
+            
+            Repository: ${{ github.repository }}
+            URL: https://jfive.mooo.com
+
+      - name: Send failure email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "❌ Application Deployment Failed"
+          to: josiahfavour02@gmail.com
+          from: DevOps Stage 6 Alert
+          body: |
+            Application deployment failed!
+            
+            Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

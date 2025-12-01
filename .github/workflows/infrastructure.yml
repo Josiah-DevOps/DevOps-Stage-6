@@ -1,0 +1,206 @@
+name: Infrastructure Deployment with Drift Detection
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/terraform/**'
+      - 'infra/ansible/**'
+      - '.github/workflows/infrastructure.yml'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-north-1
+  TF_VERSION: 1.6.0
+
+jobs:
+  terraform-plan:
+    name: Terraform Plan & Drift Detection
+    runs-on: ubuntu-latest
+    outputs:
+      has_drift: ${{ steps.drift_check.outputs.has_drift }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: infra/terraform
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: infra/terraform
+        run: |
+          set +e
+          terraform plan -out=tfplan -detailed-exitcode
+          EXIT_CODE=$?
+          set -e
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          terraform show -no-color tfplan > plan_output.txt
+          exit 0
+
+      - name: Check for Drift
+        id: drift_check
+        run: |
+          EXIT_CODE=${{ steps.plan.outputs.exit_code }}
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "has_drift=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Changes detected"
+          elif [ "$EXIT_CODE" == "0" ]; then
+            echo "has_drift=false" >> $GITHUB_OUTPUT
+            echo "✅ No changes needed"
+          else
+            echo "❌ Terraform plan failed"
+            exit 1
+          fi
+
+      - name: Upload plan output
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: infra/terraform/plan_output.txt
+
+      - name: Send Drift Detection Email - Changes Detected
+        if: steps.drift_check.outputs.has_drift == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "⚠️ DRIFT ALERT: Infrastructure Changes Detected"
+          to: josiahfavour02@gmail.com
+          from: DevOps Stage 6 Alert
+          body: |
+            INFRASTRUCTURE DRIFT DETECTED
+            
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Triggered by: ${{ github.actor }}
+            
+            Action Required: Manual approval needed
+            
+            View and approve: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Send Drift Detection Email - No Changes
+        if: steps.drift_check.outputs.has_drift == 'false'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "✅ No Infrastructure Changes"
+          to: josiahfavour02@gmail.com
+          from: DevOps Stage 6 Alert
+          body: |
+            NO INFRASTRUCTURE DRIFT DETECTED
+            
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            
+            Infrastructure matches desired state.
+
+  wait-for-approval:
+    name: Wait for Manual Approval
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: needs.terraform-plan.outputs.has_drift == 'true'
+    environment: production
+    
+    steps:
+    - name: Manual approval checkpoint
+      run: echo "✅ Changes approved"
+
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [terraform-plan, wait-for-approval]
+    if: always() && needs.terraform-plan.result == 'success' && (needs.wait-for-approval.result == 'success' || needs.terraform-plan.outputs.has_drift == 'false')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Install Ansible
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: infra/terraform
+        run: terraform apply -auto-approve
+
+      - name: Send Success Email
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "✅ Infrastructure Deployment Successful"
+          to: josiahfavour02@gmail.com
+          from: DevOps Stage 6 Alert
+          body: |
+            Infrastructure deployed successfully!
+            
+            Repository: ${{ github.repository }}
+            Application URL: https://jfive.mooo.com
+
+      - name: Send Failure Email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "❌ Infrastructure Deployment Failed"
+          to: josiahfavour02@gmail.com
+          from: DevOps Stage 6 Alert
+          body: |
+            Infrastructure deployment failed!
+            
+            Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
