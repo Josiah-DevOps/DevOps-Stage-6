@@ -1,0 +1,74 @@
+---
+- name: Check if application directory exists
+  stat:
+    path: /home/ubuntu/DevOps-Stage-6
+  register: app_dir
+
+- name: Clone application repository
+  git:
+    repo: "https://github.com/{{ github_username | default('YOUR_USERNAME') }}/DevOps-Stage-6.git"
+    dest: /home/ubuntu/DevOps-Stage-6
+    version: main
+    force: yes
+  become: yes
+  become_user: ubuntu
+  when: not app_dir.stat.exists
+
+- name: Pull latest changes
+  git:
+    repo: "https://github.com/{{ github_username | default('YOUR_USERNAME') }}/DevOps-Stage-6.git"
+    dest: /home/ubuntu/DevOps-Stage-6
+    version: main
+    force: yes
+  become: yes
+  become_user: ubuntu
+  when: app_dir.stat.exists
+  register: git_pull
+
+- name: Create traefik directory
+  file:
+    path: /home/ubuntu/DevOps-Stage-6/traefik
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: '0755'
+
+- name: Create acme.json with correct permissions
+  file:
+    path: /home/ubuntu/DevOps-Stage-6/traefik/acme.json
+    state: touch
+    owner: ubuntu
+    group: ubuntu
+    mode: '0600'
+
+- name: Stop existing containers
+  command: docker compose down
+  args:
+    chdir: /home/ubuntu/DevOps-Stage-6
+  become: yes
+  become_user: ubuntu
+  ignore_errors: yes
+  when: git_pull.changed or force_restart | default(false)
+
+- name: Build and start containers
+  command: docker compose up -d --build
+  args:
+    chdir: /home/ubuntu/DevOps-Stage-6
+  become: yes
+  become_user: ubuntu
+  when: git_pull.changed or force_restart | default(false)
+
+- name: Wait for containers to be healthy
+  command: docker compose ps
+  args:
+    chdir: /home/ubuntu/DevOps-Stage-6
+  become: yes
+  become_user: ubuntu
+  register: container_status
+  until: container_status.rc == 0
+  retries: 5
+  delay: 10
+
+- name: Display container status
+  debug:
+    msg: "{{ container_status.stdout_lines }}"

@@ -21,7 +21,7 @@ providers:
     filename: /config.yml
 
 certificatesResolvers:
-  cloudflare:
+  letsencrypt:
     acme:
       email: josiahfavour02@gmail.com
       storage: /acme.json
