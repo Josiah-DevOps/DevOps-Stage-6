@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	jwt "github.com/golang-jwt/jwt/v4"
+	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
 	gommonlog "github.com/labstack/gommon/log"
@@ -24,14 +24,7 @@ var (
 )
 
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = os.Getenv("AUTH_API_PORT")
-		if port == "" {
-			port = "8080"
-		}
-	}
-	hostport := ":" + port
+	hostport := ":" + os.Getenv("AUTH_API_PORT")
 	userAPIAddress := os.Getenv("USERS_API_ADDRESS")
 
 	envJwtSecret := os.Getenv("JWT_SECRET")

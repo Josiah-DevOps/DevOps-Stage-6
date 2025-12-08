@@ -108,7 +108,6 @@ jobs:
           echo "Deploying application..."
           ansible-playbook -i inventory/hosts playbook.yml \
             -e "github_username=${{ github.repository_owner }}" \
-            -e "force_restart=true" \
             -v
 
       - name: Verify deployment

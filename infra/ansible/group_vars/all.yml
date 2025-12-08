@@ -1,8 +1,10 @@
 ---
 # Global variables for all hosts
-github_username: "{{ lookup('env', 'GITHUB_USERNAME') | default('Josiah-DevOps') }}"
-github_repo: "DevOps-Stage-6"
+github_username: "{{ github_username | default(lookup('env', 'GITHUB_USERNAME')) | default('destinyobs') }}"
+github_repo: "your-new-repo-name"
+app_repo: "https://github.com/destinyobs/your-new-repo-name.git"
 app_directory: "/home/ubuntu/{{ github_repo }}"
+deploy_user: "ubuntu"
 domain_name: "jfive.mooo.com"
 letsencrypt_email: "josiahfavour02@gmail.com"
 

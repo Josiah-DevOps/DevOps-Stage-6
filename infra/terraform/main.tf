@@ -100,6 +100,7 @@ resource "null_resource" "run_ansible" {
 
   triggers = {
     instance_id       = aws_instance.app_server.id
+    instance_public_ip = aws_instance.app_server.public_ip
     playbook_hash     = filemd5("${path.module}/../ansible/playbook.yml")
     dependencies_hash = filemd5("${path.module}/../ansible/roles/dependencies/tasks/main.yml")
     deploy_hash       = filemd5("${path.module}/../ansible/roles/deploy/tasks/main.yml")
@@ -107,28 +108,80 @@ resource "null_resource" "run_ansible" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      echo "Waiting for instance to be ready..."
+      #!/bin/bash
+      set -e
+      
+      echo "=== Starting Deployment Process ==="
+      echo "Waiting for instance to initialize (120 seconds)..."
       sleep 120
       
-      echo "Testing SSH connectivity..."
-      SSH_KEY_FILE="$${HOME}/.ssh/id_ed25519"
+      # Validate SSH key
+      SSH_KEY_FILE="$HOME/.ssh/id_ed25519"
+      echo "Checking SSH key at: $SSH_KEY_FILE"
+      
       if [ ! -f "$SSH_KEY_FILE" ]; then
-        echo "Warning: SSH key not found at $SSH_KEY_FILE, trying common locations..."
-        SSH_KEY_FILE="~/.ssh/id_rsa"
+        echo "ERROR: SSH private key not found at $SSH_KEY_FILE"
+        echo "Please ensure SSH_PRIVATE_KEY secret is properly configured"
+        exit 1
       fi
       
-      for i in {1..30}; do
-        if ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no -o ConnectTimeout=5 ${var.ssh_user}@${aws_instance.app_server.public_ip} "echo 'SSH Ready'" 2>/dev/null; then
-          echo "SSH connection successful!"
+      # Verify key format
+      if ! grep -q "BEGIN.*PRIVATE KEY" "$SSH_KEY_FILE"; then
+        echo "ERROR: SSH key file does not contain a valid private key"
+        echo "Key must start with '-----BEGIN OPENSSH PRIVATE KEY-----' or similar"
+        exit 1
+      fi
+      
+      # Set correct permissions
+      chmod 600 "$SSH_KEY_FILE"
+      echo "✓ SSH key validated and permissions set"
+      
+      # Test SSH connectivity
+      echo "Testing SSH connection to ${aws_instance.app_server.public_ip}..."
+      MAX_ATTEMPTS=30
+      ATTEMPT=1
+      
+      while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+        if ssh -i "$SSH_KEY_FILE" \
+               -o StrictHostKeyChecking=no \
+               -o UserKnownHostsFile=/dev/null \
+               -o ConnectTimeout=10 \
+               -o BatchMode=yes \
+               ${var.ssh_user}@${aws_instance.app_server.public_ip} "echo 'SSH Ready'" 2>/dev/null; then
+          echo "✓ SSH connection established successfully!"
           break
         fi
-        echo "Waiting for SSH... attempt $i/30"
+        echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Waiting for SSH..."
         sleep 10
+        ATTEMPT=$((ATTEMPT + 1))
       done
       
-      echo "Running Ansible deployment..."
+      if [ $ATTEMPT -gt $MAX_ATTEMPTS ]; then
+        echo "ERROR: SSH connection failed after $MAX_ATTEMPTS attempts"
+        echo "Instance IP: ${aws_instance.app_server.public_ip}"
+        echo "Check security group rules and instance status"
+        exit 1
+      fi
+      
+      # Run Ansible deployment
+      echo "=== Running Ansible Deployment ==="
       cd ${path.module}/../ansible
-      ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i inventory/hosts playbook.yml -e "github_username=${var.github_username}" -v
+      
+      if [ ! -f "playbook.yml" ]; then
+        echo "ERROR: Ansible playbook not found"
+        exit 1
+      fi
+      
+      ANSIBLE_HOST_KEY_CHECKING=False \
+      ANSIBLE_SSH_RETRIES=3 \
+      ansible-playbook -i inventory/hosts playbook.yml \
+        -e "github_username=${var.github_username}" \
+        --private-key="$SSH_KEY_FILE" \
+        -v
+      
+      echo "=== Deployment Complete ==="
     EOT
+    
+    interpreter = ["/bin/bash", "-c"]
   }
 }
