@@ -1,0 +1,22 @@
+---
+# Global variables for all hosts
+github_username: "{{ lookup('env', 'GITHUB_USERNAME') | default('Josiah-DevOps') }}"
+github_repo: "DevOps-Stage-6"
+app_directory: "/home/ubuntu/{{ github_repo }}"
+domain_name: "jfive.mooo.com"
+letsencrypt_email: "josiahfavour02@gmail.com"
+
+# Docker configuration
+docker_compose_version: "2.23.0"
+
+# Application environment variables
+auth_api_port: "8080"
+todos_api_port: "8082"
+users_api_port: "8083"
+redis_host: "redis"
+redis_port: "6379"
+redis_channel: "log_channel"
+jwt_secret: "myfancysecret"
+
+# Force restart flag (can be overridden from command line)
+force_restart: false

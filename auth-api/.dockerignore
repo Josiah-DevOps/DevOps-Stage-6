@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+
+# Documentation
+README.md
+*.md
+
+# Development files
+.vscode
+.idea
+
+# Note: go.sum is REQUIRED for Docker build
+# Do NOT add go.sum to this file
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+*_test.go

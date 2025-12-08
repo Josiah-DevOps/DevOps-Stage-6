@@ -39,7 +39,7 @@ jobs:
 
       - name: Terraform Init
         working-directory: infra/terraform
-        run: terraform init
+        run: terraform init -reconfigure
 
       - name: Terraform Validate
         working-directory: infra/terraform
@@ -48,6 +48,8 @@ jobs:
       - name: Terraform Plan
         id: plan
         working-directory: infra/terraform
+        env:
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
         run: |
           set +e
           terraform plan -out=tfplan -detailed-exitcode
@@ -135,7 +137,13 @@ jobs:
     name: Terraform Apply
     runs-on: ubuntu-latest
     needs: [terraform-plan, wait-for-approval]
-    if: always() && needs.terraform-plan.result == 'success' && (needs.wait-for-approval.result == 'success' || needs.terraform-plan.outputs.has_drift == 'false')
+    if: |
+      always() && 
+      needs.terraform-plan.result == 'success' && 
+      (
+        (needs.terraform-plan.outputs.has_drift == 'true' && needs.wait-for-approval.result == 'success') ||
+        (needs.terraform-plan.outputs.has_drift == 'false')
+      )
     
     steps:
       - name: Checkout code
@@ -166,10 +174,12 @@ jobs:
 
       - name: Terraform Init
         working-directory: infra/terraform
-        run: terraform init
+        run: terraform init -reconfigure
 
       - name: Terraform Apply
         working-directory: infra/terraform
+        env:
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
         run: terraform apply -auto-approve
 
       - name: Send Success Email

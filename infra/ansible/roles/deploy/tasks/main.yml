@@ -1,0 +1,116 @@
+---
+- name: Check if application directory exists
+  stat:
+    path: "{{ app_directory }}"
+  register: app_dir
+
+- name: Clone application repository
+  git:
+    repo: "https://github.com/{{ github_username }}/{{ github_repo }}.git"
+    dest: "{{ app_directory }}"
+    version: main
+    force: yes
+  become: yes
+  become_user: ubuntu
+  when: not app_dir.stat.exists
+  register: git_clone
+
+- name: Pull latest changes
+  git:
+    repo: "https://github.com/{{ github_username }}/{{ github_repo }}.git"
+    dest: "{{ app_directory }}"
+    version: main
+    force: yes
+  become: yes
+  become_user: ubuntu
+  when: app_dir.stat.exists
+  register: git_pull
+
+- name: Set git changes fact
+  set_fact:
+    git_changed: "{{ git_clone.changed or git_pull.changed }}"
+
+- name: Ensure traefik directory exists
+  file:
+    path: "{{ app_directory }}/traefik"
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: '0755'
+
+- name: Create acme.json with correct permissions
+  file:
+    path: "{{ app_directory }}/traefik/acme.json"
+    state: touch
+    owner: ubuntu
+    group: ubuntu
+    mode: '0600'
+  changed_when: false
+
+- name: Check if docker-compose is already running
+  command: docker compose ps -q
+  args:
+    chdir: "{{ app_directory }}"
+  become: yes
+  become_user: ubuntu
+  register: compose_status
+  ignore_errors: yes
+  changed_when: false
+
+- name: Stop existing containers if changes detected
+  command: docker compose down
+  args:
+    chdir: "{{ app_directory }}"
+  become: yes
+  become_user: ubuntu
+  when: (git_changed or force_restart) and compose_status.stdout != ""
+  ignore_errors: yes
+
+- name: Pull latest images
+  command: docker compose pull
+  args:
+    chdir: "{{ app_directory }}"
+  become: yes
+  become_user: ubuntu
+  when: git_changed or force_restart
+  ignore_errors: yes
+
+- name: Build and start containers
+  command: docker compose up -d --build --remove-orphans
+  args:
+    chdir: "{{ app_directory }}"
+  become: yes
+  become_user: ubuntu
+  when: git_changed or force_restart or compose_status.stdout == ""
+  register: compose_up
+
+- name: Wait for containers to be healthy
+  command: docker compose ps
+  args:
+    chdir: "{{ app_directory }}"
+  become: yes
+  become_user: ubuntu
+  register: container_status
+  retries: 10
+  delay: 10
+  until: container_status.rc == 0
+  changed_when: false
+
+- name: Display container status
+  debug:
+    msg: "{{ container_status.stdout_lines }}"
+
+- name: Verify Traefik is running
+  command: docker ps --filter "name=traefik" --format "{{ '{{' }}.Status{{ '}}' }}"
+  register: traefik_status
+  become: yes
+  become_user: ubuntu
+  changed_when: false
+
+- name: Display Traefik status
+  debug:
+    msg: "Traefik status: {{ traefik_status.stdout }}"
+
+- name: Display application URL
+  debug:
+    msg: "Application should be available at: https://{{ domain_name }}"

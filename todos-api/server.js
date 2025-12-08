@@ -29,8 +29,8 @@ const redisClient = require("redis").createClient({
       return Math.min(options.attempt * 100, 2000);
   }        
 });
-const port = process.env.TODO_API_PORT || 8082
-const jwtSecret = process.env.JWT_SECRET || "foo"
+const port = process.env.PORT || process.env.TODO_API_PORT || 8082
+const jwtSecret = process.env.JWT_SECRET || "myfancysecret"
 
 const app = express()
 
@@ -46,7 +46,7 @@ const localServiceName = 'todos-api';
 const tracer = new Tracer({ctxImpl, recorder, localServiceName});
 
 
-app.use(jwt({ secret: jwtSecret }))
+app.use(jwt({ secret: jwtSecret, algorithms: ['HS256'] }))
 app.use(zipkinMiddleware({tracer}));
 app.use(function (err, req, res, next) {
   if (err.name === 'UnauthorizedError') {

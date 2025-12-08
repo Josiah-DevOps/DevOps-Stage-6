@@ -1,0 +1,27 @@
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/*.tfvars
+terraform/.env
+terraform/tfplan
+terraform/plan_output.txt
+
+# Ansible
+ansible/inventory/hosts
+ansible/*.retry
+ansible/.ansible/
+
+# SSH Keys
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Environment files
+.env
+*.env
+
+# Logs
+*.log

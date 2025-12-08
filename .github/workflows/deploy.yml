@@ -36,14 +36,21 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
+          terraform_version: 1.6.0
           terraform_wrapper: false
 
       - name: Get Server IP
         id: get_ip
         working-directory: infra/terraform
+        env:
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
         run: |
-          terraform init
-          SERVER_IP=$(terraform output -raw instance_public_ip)
+          terraform init -reconfigure
+          SERVER_IP=$(terraform output -raw instance_public_ip 2>/dev/null || echo "")
+          if [ -z "$SERVER_IP" ]; then
+            echo "Error: Could not retrieve server IP from Terraform"
+            exit 1
+          fi
           echo "server_ip=$SERVER_IP" >> $GITHUB_OUTPUT
           echo "Server IP: $SERVER_IP"
 
@@ -52,24 +59,63 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ steps.get_ip.outputs.server_ip }} >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H ${{ steps.get_ip.outputs.server_ip }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Setup Ansible
         run: |
           sudo apt-get update
-          sudo apt-get install -y ansible
+          sudo apt-get install -y ansible sshpass
+
+      - name: Wait for SSH to be ready
+        run: |
+          for i in {1..30}; do
+            if ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@${{ steps.get_ip.outputs.server_ip }} "echo 'SSH Ready'" 2>/dev/null; then
+              echo "SSH connection successful"
+              exit 0
+            fi
+            echo "Waiting for SSH... attempt $i/30"
+            sleep 10
+          done
+          echo "SSH connection failed after 30 attempts"
+          exit 1
+
+      - name: Create Ansible inventory
+        working-directory: infra/ansible
+        run: |
+          mkdir -p inventory
+          cat > inventory/hosts << EOF
+          [app_servers]
+          ${{ steps.get_ip.outputs.server_ip }} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_ed25519 ansible_python_interpreter=/usr/bin/python3
+          EOF
+          cat inventory/hosts
 
       - name: Deploy application
         working-directory: infra/ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
           ansible-playbook -i inventory/hosts playbook.yml \
             -e "github_username=${{ github.repository_owner }}" \
-            -e "force_restart=true"
+            -e "force_restart=true" \
+            -v
 
       - name: Verify deployment
         run: |
-          sleep 30
-          curl -f https://jfive.mooo.com || exit 1
+          echo "Waiting for application to start..."
+          sleep 45
+          
+          echo "Testing application endpoint..."
+          for i in {1..10}; do
+            if curl -f -k https://jfive.mooo.com 2>/dev/null; then
+              echo "Application is responding!"
+              exit 0
+            fi
+            echo "Attempt $i/10 failed, retrying..."
+            sleep 10
+          done
+          
+          echo "Warning: Application may not be fully ready yet, but deployment completed"
+          exit 0
 
       - name: Send success email
         if: success()

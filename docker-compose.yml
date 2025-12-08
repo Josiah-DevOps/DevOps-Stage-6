@@ -1,6 +1,6 @@
 services:
   traefik:
-    image: traefik:v2.10
+    image: traefik:v2.9
     container_name: traefik
     restart: unless-stopped
     security_opt:
@@ -17,14 +17,28 @@ services:
       - app-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.traefik.entrypoints=http"
-      - "traefik.http.routers.traefik.rule=Host(`traefik.jfive.mooo.com`)"
-      - "traefik.http.middlewares.traefik-https-redirect.redirectscheme.scheme=https"
-      - "traefik.http.routers.traefik.middlewares=traefik-https-redirect"
-      - "traefik.http.routers.traefik-secure.entrypoints=https"
-      - "traefik.http.routers.traefik-secure.rule=Host(`traefik.jfive.mooo.com`)"
-      - "traefik.http.routers.traefik-secure.tls=true"
-      - "traefik.http.routers.traefik-secure.tls.certresolver=cloudflare"
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    networks:
+      - app-network
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   frontend:
     build:
@@ -43,12 +57,21 @@ services:
       - "traefik.http.routers.frontend.rule=Host(`jfive.mooo.com`)"
       - "traefik.http.routers.frontend.entrypoints=https"
       - "traefik.http.routers.frontend.tls=true"
-      - "traefik.http.routers.frontend.tls.certresolver=cloudflare"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
       - "traefik.http.services.frontend.loadbalancer.server.port=80"
       - "traefik.http.routers.frontend-http.rule=Host(`jfive.mooo.com`)"
       - "traefik.http.routers.frontend-http.entrypoints=http"
       - "traefik.http.routers.frontend-http.middlewares=https-redirect"
       - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      traefik:
+        condition: service_healthy
 
   auth-api:
     build:
@@ -62,15 +85,28 @@ services:
       - PORT=8080
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - JWT_SECRET=myfancysecret
+      - USERS_API_ADDRESS=http://users-api:8083
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.auth-api.rule=Host(`jfive.mooo.com`) && PathPrefix(`/api/auth`)"
       - "traefik.http.routers.auth-api.entrypoints=https"
       - "traefik.http.routers.auth-api.tls=true"
-      - "traefik.http.routers.auth-api.tls.certresolver=cloudflare"
+      - "traefik.http.routers.auth-api.tls.certresolver=letsencrypt"
       - "traefik.http.services.auth-api.loadbalancer.server.port=8080"
       - "traefik.http.middlewares.auth-stripprefix.stripprefix.prefixes=/api/auth"
       - "traefik.http.routers.auth-api.middlewares=auth-stripprefix"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      traefik:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   todos-api:
     build:
@@ -84,15 +120,28 @@ services:
       - PORT=8082
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_CHANNEL=log_channel
+      - JWT_SECRET=myfancysecret
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.todos-api.rule=Host(`jfive.mooo.com`) && PathPrefix(`/api/todos`)"
       - "traefik.http.routers.todos-api.entrypoints=https"
       - "traefik.http.routers.todos-api.tls=true"
-      - "traefik.http.routers.todos-api.tls.certresolver=cloudflare"
+      - "traefik.http.routers.todos-api.tls.certresolver=letsencrypt"
       - "traefik.http.services.todos-api.loadbalancer.server.port=8082"
       - "traefik.http.middlewares.todos-stripprefix.stripprefix.prefixes=/api/todos"
       - "traefik.http.routers.todos-api.middlewares=todos-stripprefix"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8082/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      traefik:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   users-api:
     build:
@@ -103,7 +152,7 @@ services:
     networks:
       - app-network
     environment:
-      - PORT=8083
+      - SERVER_PORT=8083
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     labels:
@@ -111,10 +160,21 @@ services:
       - "traefik.http.routers.users-api.rule=Host(`jfive.mooo.com`) && PathPrefix(`/api/users`)"
       - "traefik.http.routers.users-api.entrypoints=https"
       - "traefik.http.routers.users-api.tls=true"
-      - "traefik.http.routers.users-api.tls.certresolver=cloudflare"
+      - "traefik.http.routers.users-api.tls.certresolver=letsencrypt"
       - "traefik.http.services.users-api.loadbalancer.server.port=8083"
       - "traefik.http.middlewares.users-stripprefix.stripprefix.prefixes=/api/users"
       - "traefik.http.routers.users-api.middlewares=users-stripprefix"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8083/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      traefik:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   log-processor:
     build:
@@ -128,15 +188,9 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_CHANNEL=log_channel
-
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    restart: unless-stopped
-    networks:
-      - app-network
-    volumes:
-      - redis-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
 
 networks:
   app-network:
