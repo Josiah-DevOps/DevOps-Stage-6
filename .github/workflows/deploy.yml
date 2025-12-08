@@ -44,15 +44,24 @@ jobs:
         working-directory: infra/terraform
         env:
           TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+          TF_VAR_github_username: ${{ github.repository_owner }}
         run: |
           terraform init -reconfigure
+          
+          # Check if infrastructure exists
+          if ! terraform state list 2>/dev/null | grep -q "aws_instance.app_server"; then
+            echo "❌ Infrastructure not found! Please run the infrastructure workflow first."
+            echo "error=Infrastructure not provisioned" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
           SERVER_IP=$(terraform output -raw instance_public_ip 2>/dev/null || echo "")
           if [ -z "$SERVER_IP" ]; then
-            echo "Error: Could not retrieve server IP from Terraform"
+            echo "❌ Could not retrieve server IP from Terraform"
             exit 1
           fi
           echo "server_ip=$SERVER_IP" >> $GITHUB_OUTPUT
-          echo "Server IP: $SERVER_IP"
+          echo "✅ Server IP: $SERVER_IP"
 
       - name: Setup SSH key
         run: |
@@ -64,19 +73,20 @@ jobs:
       - name: Setup Ansible
         run: |
           sudo apt-get update
-          sudo apt-get install -y ansible sshpass
+          sudo apt-get install -y ansible
 
-      - name: Wait for SSH to be ready
+      - name: Test SSH connectivity
         run: |
-          for i in {1..30}; do
+          echo "Testing SSH connection to server..."
+          for i in {1..10}; do
             if ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@${{ steps.get_ip.outputs.server_ip }} "echo 'SSH Ready'" 2>/dev/null; then
-              echo "SSH connection successful"
+              echo "✅ SSH connection successful"
               exit 0
             fi
-            echo "Waiting for SSH... attempt $i/30"
-            sleep 10
+            echo "Waiting for SSH... attempt $i/10"
+            sleep 5
           done
-          echo "SSH connection failed after 30 attempts"
+          echo "❌ SSH connection failed. Server may be down or unreachable."
           exit 1
 
       - name: Create Ansible inventory
@@ -87,13 +97,15 @@ jobs:
           [app_servers]
           ${{ steps.get_ip.outputs.server_ip }} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_ed25519 ansible_python_interpreter=/usr/bin/python3
           EOF
+          echo "Inventory created:"
           cat inventory/hosts
 
-      - name: Deploy application
+      - name: Deploy application with Ansible
         working-directory: infra/ansible
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
+          echo "Deploying application..."
           ansible-playbook -i inventory/hosts playbook.yml \
             -e "github_username=${{ github.repository_owner }}" \
             -e "force_restart=true" \
@@ -102,20 +114,19 @@ jobs:
       - name: Verify deployment
         run: |
           echo "Waiting for application to start..."
-          sleep 45
+          sleep 30
           
-          echo "Testing application endpoint..."
+          echo "Testing application endpoints..."
           for i in {1..10}; do
             if curl -f -k https://jfive.mooo.com 2>/dev/null; then
-              echo "Application is responding!"
+              echo "✅ Application is responding!"
               exit 0
             fi
             echo "Attempt $i/10 failed, retrying..."
             sleep 10
           done
           
-          echo "Warning: Application may not be fully ready yet, but deployment completed"
-          exit 0
+          echo "⚠️ Warning: Application may not be fully ready yet, but deployment completed"
 
       - name: Send success email
         if: success()
@@ -125,14 +136,99 @@ jobs:
           server_port: 587
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "✅ Application Deployment Successful"
+          subject: "✅ Deployment Successful: ${{ github.repository }}"
           to: josiahfavour02@gmail.com
           from: DevOps Stage 6 Alert
-          body: |
-            Application deployed successfully!
-            
-            Repository: ${{ github.repository }}
-            URL: https://jfive.mooo.com
+          html_body: |
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+              <h2 style="color: #28a745; border-bottom: 2px solid #28a745; padding-bottom: 10px;">
+                ✅ APPLICATION DEPLOYED SUCCESSFULLY
+              </h2>
+              
+              <div style="background-color: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0;">
+                <strong>✅ Status:</strong> Application is live and running!
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">🌐 Application URLs</h3>
+              <div style="background-color: #f6f8fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                <strong>🌍 Frontend:</strong> <a href="https://jfive.mooo.com">https://jfive.mooo.com</a><br>
+                <strong>🔐 Auth API:</strong> <a href="https://jfive.mooo.com/api/auth/version">https://jfive.mooo.com/api/auth/version</a><br>
+                <strong>📝 Todos API:</strong> <a href="https://jfive.mooo.com/api/todos">https://jfive.mooo.com/api/todos</a><br>
+                <strong>👥 Users API:</strong> <a href="https://jfive.mooo.com/api/users">https://jfive.mooo.com/api/users</a>
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">📋 Deployment Details</h3>
+              <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Repository:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.repository }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Branch:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.ref_name }}</td>
+                </tr>
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Server IP:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ steps.get_ip.outputs.server_ip }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Run Number:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">#${{ github.run_number }}</td>
+                </tr>
+              </table>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">👤 Commit Information</h3>
+              <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Commit SHA:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">
+                    <code style="background-color: #f6f8fa; padding: 2px 6px; border-radius: 3px;">${{ github.sha }}</code>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Author:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.event.head_commit.author.name }} (${{ github.event.head_commit.author.email }})</td>
+                </tr>
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Deployed By:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.actor }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Timestamp:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.event.head_commit.timestamp }}</td>
+                </tr>
+              </table>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">💬 Commit Message</h3>
+              <div style="background-color: #f6f8fa; padding: 15px; border-radius: 5px; border-left: 4px solid #0366d6; margin-bottom: 20px;">
+                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${{ github.event.head_commit.message }}</pre>
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">📁 Changed Files</h3>
+              <div style="background-color: #f6f8fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                <strong>Added:</strong> ${{ join(github.event.head_commit.added, ', ') || 'None' }}<br>
+                <strong>Modified:</strong> ${{ join(github.event.head_commit.modified, ', ') || 'None' }}<br>
+                <strong>Removed:</strong> ${{ join(github.event.head_commit.removed, ', ') || 'None' }}
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">🔗 Quick Links</h3>
+              <div style="margin: 20px 0;">
+                <a href="https://jfive.mooo.com" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #28a745; color: white; text-decoration: none; border-radius: 5px;">
+                  🌐 Visit Application
+                </a>
+                <a href="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #0366d6; color: white; text-decoration: none; border-radius: 5px;">
+                  📝 View Commit
+                </a>
+                <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #6f42c1; color: white; text-decoration: none; border-radius: 5px;">
+                  📊 View Logs
+                </a>
+              </div>
+            </body>
+            </html>
 
       - name: Send failure email
         if: failure()
@@ -142,10 +238,99 @@ jobs:
           server_port: 587
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "❌ Application Deployment Failed"
+          subject: "❌ Deployment Failed: ${{ github.repository }}"
           to: josiahfavour02@gmail.com
           from: DevOps Stage 6 Alert
-          body: |
-            Application deployment failed!
-            
-            Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          html_body: |
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+              <h2 style="color: #d73a49; border-bottom: 2px solid #d73a49; padding-bottom: 10px;">
+                ❌ APPLICATION DEPLOYMENT FAILED
+              </h2>
+              
+              <div style="background-color: #f8d7da; border-left: 4px solid #d73a49; padding: 15px; margin: 20px 0;">
+                <strong>❌ Status:</strong> Deployment encountered errors. Immediate action required!
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">📋 Deployment Details</h3>
+              <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Repository:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.repository }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Branch:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.ref_name }}</td>
+                </tr>
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Failed Job:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.job }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Run Number:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">#${{ github.run_number }}</td>
+                </tr>
+              </table>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">👤 Commit Information</h3>
+              <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Commit SHA:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">
+                    <code style="background-color: #f6f8fa; padding: 2px 6px; border-radius: 3px;">${{ github.sha }}</code>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Author:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.event.head_commit.author.name }} (${{ github.event.head_commit.author.email }})</td>
+                </tr>
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Triggered By:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.actor }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Timestamp:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.event.head_commit.timestamp }}</td>
+                </tr>
+              </table>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">💬 Commit Message</h3>
+              <div style="background-color: #f6f8fa; padding: 15px; border-radius: 5px; border-left: 4px solid #0366d6; margin-bottom: 20px;">
+                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${{ github.event.head_commit.message }}</pre>
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">📁 Changed Files</h3>
+              <div style="background-color: #f6f8fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                <strong>Added:</strong> ${{ join(github.event.head_commit.added, ', ') || 'None' }}<br>
+                <strong>Modified:</strong> ${{ join(github.event.head_commit.modified, ', ') || 'None' }}<br>
+                <strong>Removed:</strong> ${{ join(github.event.head_commit.removed, ', ') || 'None' }}
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">🔗 Quick Links</h3>
+              <div style="margin: 20px 0;">
+                <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #d73a49; color: white; text-decoration: none; border-radius: 5px;">
+                  🔍 View Error Logs
+                </a>
+                <a href="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #0366d6; color: white; text-decoration: none; border-radius: 5px;">
+                  📝 View Commit
+                </a>
+                <a href="${{ github.server_url }}/${{ github.repository }}/actions" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #6f42c1; color: white; text-decoration: none; border-radius: 5px;">
+                  📊 All Workflows
+                </a>
+              </div>
+              
+              <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+              
+              <p style="color: #666; font-size: 12px;">
+                <strong>Troubleshooting Steps:</strong><br>
+                1. Check the workflow logs for detailed error messages<br>
+                2. Review the changes in the failed commit<br>
+                3. Verify all secrets and environment variables are set correctly<br>
+                4. Check server connectivity and SSH access<br>
+                5. Review docker-compose logs on the server if deployment reached that stage
+              </p>
+            </body>
+            </html>

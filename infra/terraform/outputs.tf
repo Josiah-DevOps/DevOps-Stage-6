@@ -20,10 +20,10 @@ output "security_group_id" {
 
 output "ssh_command" {
   description = "SSH command to connect to the instance"
-  value       = "ssh -i ${var.ssh_private_key_path} ${var.ssh_user}@${aws_instance.app_server.public_ip}"
+  value       = "ssh -i ~/.ssh/id_ed25519 ${var.ssh_user}@${aws_instance.app_server.public_ip}"
 }
 
 output "application_url" {
   description = "Application URL"
-  value       = "https://${var.domain_name}"
+  value       = "https://jfive.mooo.com"
 }

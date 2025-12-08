@@ -1,6 +1,6 @@
 # AWS Configuration
 aws_region    = "eu-north-1"
-instance_type = "t3.medium"
+instance_type = "t3.micro"  # Free tier eligible
 
 # AMI ID for Ubuntu 22.04 in eu-north-1
 # Update this if using a different region
@@ -9,15 +9,19 @@ ami_id = "ami-0705384c0b33c194c"
 # SSH Configuration
 # IMPORTANT: Replace with your actual SSH public key
 ssh_public_key = "ssh-ed25519 AAAA... your-email@example.com"
-ssh_private_key_path = "~/.ssh/id_ed25519"
+
+# Note: Private key is NOT stored in Terraform
+# For CI/CD: Private key is stored as GitHub Secret (SSH_PRIVATE_KEY)
+# For local use: Terraform uses your ~/.ssh/id_ed25519 automatically
+
 ssh_user = "ubuntu"
 
 # Key pair name (will be created in AWS)
 key_name = "devops-stage6-key"
 
-# Application Configuration
-# IMPORTANT: Replace with your actual domain name
-domain_name = "your-domain.com"
+# GitHub Configuration
+# IMPORTANT: Replace with your GitHub username
+github_username = "your-github-username"
 
 # Email for SSL certificates and notifications
 # IMPORTANT: Replace with your actual email

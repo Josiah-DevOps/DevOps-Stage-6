@@ -50,6 +50,7 @@ jobs:
         working-directory: infra/terraform
         env:
           TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+          TF_VAR_github_username: ${{ github.repository_owner }}
         run: |
           set +e
           terraform plan -out=tfplan -detailed-exitcode
@@ -88,20 +89,105 @@ jobs:
           server_port: 587
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "⚠️ DRIFT ALERT: Infrastructure Changes Detected"
+          subject: "⚠️ DRIFT ALERT: Infrastructure Changes Detected in ${{ github.repository }}"
           to: josiahfavour02@gmail.com
           from: DevOps Stage 6 Alert
-          body: |
-            INFRASTRUCTURE DRIFT DETECTED
-            
-            Repository: ${{ github.repository }}
-            Branch: ${{ github.ref_name }}
-            Commit: ${{ github.sha }}
-            Triggered by: ${{ github.actor }}
-            
-            Action Required: Manual approval needed
-            
-            View and approve: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          html_body: |
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+              <h2 style="color: #d73a49; border-bottom: 2px solid #d73a49; padding-bottom: 10px;">
+                ⚠️ INFRASTRUCTURE DRIFT DETECTED
+              </h2>
+              
+              <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;">
+                <strong>⚠️ Action Required:</strong> Manual approval needed before infrastructure changes are applied.
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">📋 Workflow Details</h3>
+              <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Repository:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.repository }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Branch:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.ref_name }}</td>
+                </tr>
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Workflow:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.workflow }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Run Number:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">#${{ github.run_number }}</td>
+                </tr>
+              </table>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">👤 Commit Information</h3>
+              <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Commit SHA:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">
+                    <code style="background-color: #f6f8fa; padding: 2px 6px; border-radius: 3px;">${{ github.sha }}</code>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Author:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.event.head_commit.author.name }} (${{ github.event.head_commit.author.email }})</td>
+                </tr>
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Committer:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.event.head_commit.committer.name }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Triggered By:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.actor }}</td>
+                </tr>
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Timestamp:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.event.head_commit.timestamp }}</td>
+                </tr>
+              </table>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">💬 Commit Message</h3>
+              <div style="background-color: #f6f8fa; padding: 15px; border-radius: 5px; border-left: 4px solid #0366d6; margin-bottom: 20px;">
+                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${{ github.event.head_commit.message }}</pre>
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">📁 Modified Files</h3>
+              <div style="background-color: #f6f8fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                <strong>Added:</strong> ${{ join(github.event.head_commit.added, ', ') || 'None' }}<br>
+                <strong>Modified:</strong> ${{ join(github.event.head_commit.modified, ', ') || 'None' }}<br>
+                <strong>Removed:</strong> ${{ join(github.event.head_commit.removed, ', ') || 'None' }}
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">🔗 Quick Links</h3>
+              <div style="margin: 20px 0;">
+                <a href="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #0366d6; color: white; text-decoration: none; border-radius: 5px;">
+                  📝 View Commit
+                </a>
+                <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #28a745; color: white; text-decoration: none; border-radius: 5px;">
+                  ✅ Approve & Deploy
+                </a>
+                <a href="${{ github.server_url }}/${{ github.repository }}/tree/${{ github.ref_name }}/infra" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #6f42c1; color: white; text-decoration: none; border-radius: 5px;">
+                  📂 View Infrastructure
+                </a>
+              </div>
+              
+              <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+              
+              <p style="color: #666; font-size: 12px;">
+                <strong>Next Steps:</strong><br>
+                1. Review the changes in the commit above<br>
+                2. Check the Terraform plan in the workflow logs<br>
+                3. Click "Approve & Deploy" to proceed with applying infrastructure changes<br>
+                4. Or reject the deployment if changes are not authorized
+              </p>
+            </body>
+            </html>
 
       - name: Send Drift Detection Email - No Changes
         if: steps.drift_check.outputs.has_drift == 'false'
@@ -111,16 +197,101 @@ jobs:
           server_port: 587
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "✅ No Infrastructure Changes"
+          subject: "✅ No Infrastructure Drift - Auto-Deploying: ${{ github.repository }}"
           to: josiahfavour02@gmail.com
           from: DevOps Stage 6 Alert
-          body: |
-            NO INFRASTRUCTURE DRIFT DETECTED
-            
-            Repository: ${{ github.repository }}
-            Branch: ${{ github.ref_name }}
-            
-            Infrastructure matches desired state.
+          html_body: |
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+              <h2 style="color: #28a745; border-bottom: 2px solid #28a745; padding-bottom: 10px;">
+                ✅ NO INFRASTRUCTURE DRIFT DETECTED
+              </h2>
+              
+              <div style="background-color: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0;">
+                <strong>✅ Status:</strong> Infrastructure matches desired state. Proceeding automatically.
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">📋 Workflow Details</h3>
+              <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Repository:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.repository }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Branch:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.ref_name }}</td>
+                </tr>
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Workflow:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.workflow }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Run Number:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">#${{ github.run_number }}</td>
+                </tr>
+              </table>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">👤 Commit Information</h3>
+              <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Commit SHA:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">
+                    <code style="background-color: #f6f8fa; padding: 2px 6px; border-radius: 3px;">${{ github.sha }}</code>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Author:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.event.head_commit.author.name }} (${{ github.event.head_commit.author.email }})</td>
+                </tr>
+                <tr style="background-color: #f6f8fa;">
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Triggered By:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.actor }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Timestamp:</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${{ github.event.head_commit.timestamp }}</td>
+                </tr>
+              </table>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">💬 Commit Message</h3>
+              <div style="background-color: #f6f8fa; padding: 15px; border-radius: 5px; border-left: 4px solid #0366d6; margin-bottom: 20px;">
+                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${{ github.event.head_commit.message }}</pre>
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">📁 Modified Files</h3>
+              <div style="background-color: #f6f8fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                <strong>Added:</strong> ${{ join(github.event.head_commit.added, ', ') || 'None' }}<br>
+                <strong>Modified:</strong> ${{ join(github.event.head_commit.modified, ', ') || 'None' }}<br>
+                <strong>Removed:</strong> ${{ join(github.event.head_commit.removed, ', ') || 'None' }}
+              </div>
+              
+              <h3 style="color: #0366d6; margin-top: 25px;">🔗 Quick Links</h3>
+              <div style="margin: 20px 0;">
+                <a href="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #0366d6; color: white; text-decoration: none; border-radius: 5px;">
+                  📝 View Commit
+                </a>
+                <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #28a745; color: white; text-decoration: none; border-radius: 5px;">
+                  👀 View Workflow Run
+                </a>
+                <a href="${{ github.server_url }}/${{ github.repository }}/tree/${{ github.ref_name }}/infra" 
+                   style="display: inline-block; padding: 10px 20px; margin: 5px; background-color: #6f42c1; color: white; text-decoration: none; border-radius: 5px;">
+                  📂 View Infrastructure
+                </a>
+              </div>
+              
+              <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+              
+              <p style="color: #666; font-size: 12px;">
+                <strong>What Happened:</strong><br>
+                • Terraform plan detected no infrastructure drift<br>
+                • Current infrastructure matches the desired state in code<br>
+                • No changes needed - infrastructure is up to date<br>
+                • This is an informational notification only
+              </p>
+            </body>
+            </html>
 
   wait-for-approval:
     name: Wait for Manual Approval
@@ -180,7 +351,14 @@ jobs:
         working-directory: infra/terraform
         env:
           TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
-        run: terraform apply -auto-approve
+          TF_VAR_github_username: ${{ github.repository_owner }}
+        run: |
+          echo "Applying Terraform changes..."
+          terraform apply -auto-approve
+          
+          echo "✅ Infrastructure provisioned"
+          echo "✅ Ansible deployment completed"
+          echo "Application should be accessible at: https://jfive.mooo.com"
 
       - name: Send Success Email
         if: success()

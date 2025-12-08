@@ -79,13 +79,16 @@ resource "aws_instance" "app_server" {
   tags = {
     Name = "devops-stage6-server"
   }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "local_file" "ansible_inventory" {
   content = templatefile("${path.module}/inventory.tpl", {
     server_ip   = aws_instance.app_server.public_ip
     ssh_user    = var.ssh_user
-    private_key = var.ssh_private_key_path
   })
   filename = "${path.module}/../ansible/inventory/hosts"
 
@@ -96,18 +99,36 @@ resource "null_resource" "run_ansible" {
   depends_on = [local_file.ansible_inventory, aws_instance.app_server]
 
   triggers = {
-    instance_id      = aws_instance.app_server.id
-    playbook_hash    = filemd5("${path.module}/../ansible/playbook.yml")
+    instance_id       = aws_instance.app_server.id
+    playbook_hash     = filemd5("${path.module}/../ansible/playbook.yml")
     dependencies_hash = filemd5("${path.module}/../ansible/roles/dependencies/tasks/main.yml")
-    deploy_hash      = filemd5("${path.module}/../ansible/roles/deploy/tasks/main.yml")
+    deploy_hash       = filemd5("${path.module}/../ansible/roles/deploy/tasks/main.yml")
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       echo "Waiting for instance to be ready..."
-      sleep 60
+      sleep 120
+      
+      echo "Testing SSH connectivity..."
+      SSH_KEY_FILE="$${HOME}/.ssh/id_ed25519"
+      if [ ! -f "$SSH_KEY_FILE" ]; then
+        echo "Warning: SSH key not found at $SSH_KEY_FILE, trying common locations..."
+        SSH_KEY_FILE="~/.ssh/id_rsa"
+      fi
+      
+      for i in {1..30}; do
+        if ssh -i "$SSH_KEY_FILE" -o StrictHostKeyChecking=no -o ConnectTimeout=5 ${var.ssh_user}@${aws_instance.app_server.public_ip} "echo 'SSH Ready'" 2>/dev/null; then
+          echo "SSH connection successful!"
+          break
+        fi
+        echo "Waiting for SSH... attempt $i/30"
+        sleep 10
+      done
+      
+      echo "Running Ansible deployment..."
       cd ${path.module}/../ansible
-      ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i inventory/hosts playbook.yml
+      ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i inventory/hosts playbook.yml -e "github_username=${var.github_username}" -v
     EOT
   }
 }

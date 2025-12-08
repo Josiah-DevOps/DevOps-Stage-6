@@ -19,12 +19,18 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o auth-api .
 # Production stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates && \
+    addgroup -g 1000 appuser && \
+    adduser -D -u 1000 -G appuser appuser
 
-WORKDIR /root/
+WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/auth-api .
+
+# Change ownership and switch to non-root user
+RUN chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8080
 

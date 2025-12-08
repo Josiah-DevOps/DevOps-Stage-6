@@ -1,0 +1,124 @@
+# Manual Workflow to Fix Instance Without Public IP
+name: Fix Infrastructure - Force Replace Instance
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "yes" to destroy and recreate the instance'
+        required: true
+        default: 'no'
+
+env:
+  AWS_REGION: eu-north-1
+  TF_VERSION: 1.6.0
+
+jobs:
+  fix-instance:
+    name: Destroy and Recreate Instance
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'yes'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Install Ansible
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init -reconfigure
+
+      - name: Check Current State
+        working-directory: infra/terraform
+        env:
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+          TF_VAR_github_username: ${{ github.repository_owner }}
+        run: |
+          echo "📋 Current instance state:"
+          terraform state show aws_instance.app_server | grep -E "(id|public_ip|instance_type)" || echo "No instance found"
+
+      - name: Destroy Problematic Resources
+        working-directory: infra/terraform
+        env:
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+          TF_VAR_github_username: ${{ github.repository_owner }}
+        run: |
+          echo "🗑️  Destroying instance without public IP..."
+          terraform destroy \
+            -target=aws_instance.app_server \
+            -target=null_resource.run_ansible \
+            -target=local_file.ansible_inventory \
+            -auto-approve
+
+      - name: Recreate Infrastructure
+        working-directory: infra/terraform
+        env:
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+          TF_VAR_github_username: ${{ github.repository_owner }}
+        run: |
+          echo "✨ Recreating infrastructure..."
+          terraform apply -auto-approve
+
+      - name: Verify New Instance
+        working-directory: infra/terraform
+        run: |
+          echo "✅ New instance created:"
+          terraform output instance_public_ip
+          terraform output ssh_command
+
+      - name: Send Success Email
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "✅ Infrastructure Fixed - Instance Recreated"
+          to: josiahfavour02@gmail.com
+          from: DevOps Stage 6 Alert
+          body: |
+            Infrastructure has been fixed!
+            
+            The instance was destroyed and recreated with a new public IP.
+            Application should now be accessible at: https://jfive.mooo.com
+            
+            Repository: ${{ github.repository }}
+
+      - name: Send Failure Email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "❌ Infrastructure Fix Failed"
+          to: josiahfavour02@gmail.com
+          from: DevOps Stage 6 Alert
+          body: |
+            Failed to fix infrastructure!
+            
+            Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
